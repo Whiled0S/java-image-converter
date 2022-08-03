@@ -2,6 +2,7 @@ package ru.netology.graphics.image;
 
 import java.io.IOException;
 import java.net.URL;
+import java.nio.Buffer;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.awt.image.WritableRaster;
@@ -9,6 +10,10 @@ import javax.imageio.ImageIO;
 
 public class DefaultTextGraphicsConverter implements TextGraphicsConverter {
   private TextColorSchema schema;
+
+  private Integer maxHeight;
+  private Integer maxWidth;
+  private Double maxRatio;
 
   public DefaultTextGraphicsConverter(TextColorSchema schema) {
     this.schema = schema;
@@ -18,25 +23,65 @@ public class DefaultTextGraphicsConverter implements TextGraphicsConverter {
   public String convert(String url) throws IOException, BadImageSizeException {
     final BufferedImage image = ImageIO.read(new URL(url));
 
-    final BufferedImage grayImage = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
-    final Graphics graphics = grayImage.getGraphics();
+    if (this.maxRatio != null) {
+      this.validateRatio(image, this.maxRatio);
+    }
+
+    BufferedImage imageToConvert = this.convertToGrayscale(image);
+
+    if (this.maxHeight != null && this.maxWidth != null) {
+      imageToConvert = this.scaleToAllowedDimensions(imageToConvert, this.maxWidth, this.maxHeight);
+    }
+
+    return this.convertToCharset(imageToConvert);
+  }
+
+  @Override
+  public void setMaxWidth(int width) {
+    this.maxWidth = width;
+  }
+
+  @Override
+  public void setMaxHeight(int height) {
+    this.maxHeight = height;
+  }
+
+  @Override
+  public void setMaxRatio(double maxRatio) {
+    this.maxRatio = maxRatio;
+  }
+
+  @Override
+  public void setTextColorSchema(TextColorSchema schema) {
+    this.schema = schema;
+  }
+
+  private BufferedImage convertToGrayscale(BufferedImage image) {
+    final BufferedImage grayscale = new BufferedImage(
+        image.getWidth(),
+        image.getHeight(),
+        BufferedImage.TYPE_BYTE_GRAY);
+    final Graphics2D graphics = grayscale.createGraphics();
 
     graphics.drawImage(image, 0, 0, null);
-    graphics.dispose();
 
-    final WritableRaster raster = grayImage.getRaster();
+    return grayscale;
+  }
 
-    final int grayImageWidth = grayImage.getWidth();
-    final int grayImageHeight = grayImage.getHeight();
+  private String convertToCharset(BufferedImage image) {
+    final WritableRaster raster = image.getRaster();
 
-    StringBuilder result = new StringBuilder(grayImageWidth * grayImageHeight + grayImageHeight);
+    final int width = image.getWidth();
+    final int height = image.getHeight();
 
-    for (int j = 0; j < grayImageHeight; j++) {
-      for (int i = 0; i < grayImageWidth; i++) {
-          int color = raster.getPixel(i, j, new int[3])[0];
-          char c = this.schema.convert(color);
-          
-          result.append(c);
+    final int[] preallocatedArray = new int[3];
+    final StringBuilder result = new StringBuilder(width * height + height);
+
+    for (int j = 0; j < height; j++) {
+      for (int i = 0; i < width; i++) {
+        int color = raster.getPixel(i, j, preallocatedArray)[0];
+
+        result.append(this.schema.convert(color));
       }
 
       result.append('\n');
@@ -45,26 +90,34 @@ public class DefaultTextGraphicsConverter implements TextGraphicsConverter {
     return result.toString();
   }
 
-  @Override
-  public void setMaxWidth(int width) {
-    // TODO Auto-generated method stub
-    
+  private BufferedImage scaleToAllowedDimensions(BufferedImage image, int maxWidth, int maxHeight) {
+    final int width = image.getWidth();
+    final int height = image.getHeight();
+
+    if (width <= maxWidth && height <= maxHeight) {
+      return image;
+    }
+
+    final double widthDiff = width / maxWidth;
+    final double heightDiff = height / maxHeight;
+    final double mainDiff = widthDiff > heightDiff ? widthDiff : heightDiff;
+
+    final int newWidth = (int) Math.floor(width / mainDiff);
+    final int newHeight = (int) Math.floor(height / mainDiff);
+
+    BufferedImage scaled = new BufferedImage(newWidth, newHeight, image.getType());
+    Graphics2D graphics = scaled.createGraphics();
+
+    graphics.drawImage(image, 0, 0, newWidth, newHeight, 0, 0, width, height, null);
+
+    return scaled;
   }
 
-  @Override
-  public void setMaxHeight(int height) {
-    // TODO Auto-generated method stub
-    
-  }
+  private void validateRatio(BufferedImage image, double maxRatio) throws BadImageSizeException {
+    final double ratio = image.getWidth() / image.getHeight();
 
-  @Override
-  public void setMaxRatio(double maxRatio) {
-    // TODO Auto-generated method stub
-    
-  }
-
-  @Override
-  public void setTextColorSchema(TextColorSchema schema) {
-    this.schema = schema;
+    if (ratio > this.maxRatio) {
+      throw new BadImageSizeException(ratio, maxRatio);
+    }
   }
 }
